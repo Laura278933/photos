@@ -1,15 +1,122 @@
 ---
-title: "Big Rock Pool Challenge Biodiversity Report - Q1 2026"
 output:
   html_document:
     toc: true
     toc_depth: 3
-    theme: null
     css: "brand_styles.css"
     includes:
       before_body: "before_body.html"
     self_contained: false
 ---
+
+```{r intro-block, results='asis', echo=FALSE}
+
+htmltools::div(
+  style = "
+    background: linear-gradient(135deg, #00A6FB 0%, #4D56F5 55%, #0B1F3B 100%);
+    padding: 26px 22px 18px 22px;
+    border-radius: 20px;
+    margin: 16px auto 28px auto;
+    max-width: 980px;
+    box-shadow: 0 10px 28px rgba(0,0,0,0.18);
+    position: relative;
+    overflow: hidden;
+    color: #ffffff;
+  ",
+
+  # ---------------- FOAM OVERLAY ----------------
+  htmltools::div(
+    style = "
+      position:absolute;
+      inset:0;
+      background: linear-gradient(
+  135deg,
+  #2FB7FF 0%,
+  #2A7DE1 55%,
+  #10263F 100%
+);
+"
+),
+
+  # ---------------- CONTENT ----------------
+  htmltools::div(
+    style = "position:relative; text-align:center;",
+
+    htmltools::tags$h2(
+      "About The Big Rock Pool Challenge",
+      style = "
+        margin:0;
+        font-size:20px;
+        font-weight:600;
+        letter-spacing:-0.2px;
+        color:rgba(255,255,255,0.92);
+      "
+    )
+  ),
+
+  # ---------------- GLASS INTRO PANEL ----------------
+  htmltools::div(
+    style = "
+      margin-top:16px;
+      background: rgba(255,255,255,0.10);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      border: 1px solid rgba(255,255,255,0.14);
+      border-radius: 14px;
+      padding: 14px 16px;
+      font-size: 14px;
+      line-height: 1.5;
+      color: rgba(255,255,255,0.88);
+      text-align:left;
+    ",
+
+    htmltools::tags$p(
+      htmltools::a(
+        href = "https://www.therockpoolproject.co.uk/the-big-rock-pool-challenge",
+        style = "color:#D1F4FF; font-weight:600;",
+        "The Big Rock Pool Challenge"
+      ),
+      " is a UK-wide citizen science initiative run by the Rock Pool Project, bringing people together to explore and record life on UK rocky shores. Participants take part in monthly BioBlitz Battle games, recording coastal marine life at designated monitoring hubs using the iNaturalist platform and the BioBlitz Battle app."
+    ),
+
+    htmltools::tags$p(
+      "Records are verified through community identifications, allowing observations to reach research-grade status. Every record added helps build a growing picture of coastal biodiversity around the UK."
+    ),
+
+    htmltools::tags$p(
+      "The Big Rock Pool Challenge is run by The Rock Pool Project, in partnership with the Marine Biological Association, and is funded by the ScottishPower Foundation and the National Lottery Heritage Fund."
+    )
+  ),
+
+  # ---------------- FUNDERS ----------------
+  htmltools::div(
+    style = "
+      display:flex;
+      justify-content:center;
+      align-items:center;
+      gap:22px;
+      margin-top:14px;
+      flex-wrap:wrap;
+      position:relative;
+    ",
+
+    htmltools::tags$img(
+      src = "https://cdn.prod.website-files.com/6761e748382f7a483dc6c2ee/67dc251080bf058c3bffd547_hf-logo.png",
+      style = "height:42px;"
+    ),
+
+    htmltools::tags$img(
+      src = "https://cdn.prod.website-files.com/6761e748382f7a483dc6c2ee/690234a2aeabe1446d63c1cc_AAFF%20LOGOTYPE%20SCOTTISHPOWER%20FOUNDATION%20RGB-p-2000.jpg",
+      style = "height:42px;"
+    ),
+
+    htmltools::tags$img(
+      src = "https://cdn.prod.website-files.com/6761e748382f7a483dc6c2ee/67b4f7fae1b32ae21a76b697_Untitled%20design%20(11).png",
+      style = "height:42px;"
+    )
+  )
+)
+```
 
 ```{r setup-chunk, include=FALSE}
 knitr::opts_chunk$set(
@@ -231,27 +338,25 @@ render_summary_card <- function(title, observations, contributors, species) {
 }
 ```
 
-# All project data
+# Big Rock Pool Challenge Biodiversity Report - Q1 2026
+
+This report brings together all observations recorded through the Big Rock Pool Challenge up to March 2026, with a closer look at activity during Quarter 1 of 2026 (January–March).
+
+## All project data
 
 The Big Rock Pool Challenge commenced in October 2024 at hubs located at Castle Beach, Falmouth and Mount Batten, Plymouth. In October 2025, seven new hubs joined the Big Rock Pool Challenge:
 
 - Shoeburyness, Southend-on-Sea
-
 - Kilve Beach, Somerset
-
 - Beadnell Haven, Northumberland
-
 - East Sands, St Andrews
-
 - Lee-on-the-Solent, Hampshire
-
 - Menai Bridge, Bangor
-
 - Ovingdean, Brighton
 
 Data presented in this section of the report reflect all Big Rock Pool Challenge records from the start of the project in October 2024, until the end of Quarter 1 (end of March) 2026.
 
-To view data from Quarter 1 of 2026 only, please see the second half of this report, or [click here](#q1-2026).
+**To view data from Quarter 1 of 2026 only, please see the second half of this report, or [click here](#q1-2026).**
 
 ```{r overall-summary}
 
@@ -266,6 +371,8 @@ tagList(
 )
 
 ```
+
+Species are grouped into higher-level “iconic taxa” categories based on their taxonomic ancestry. This grouping simplifies complex species-level data into broader biological categories (e.g. molluscs, crustaceans, algae), allowing clearer interpretation of community structure across sites and time periods.
 
 ```{r iconic-taxa}
 
@@ -355,6 +462,10 @@ q1_iconic <- q1_iconic %>%
   )
 ```
 
+The Big Rock Pool Challenge is powered by people. Every observation and identification is a contribution to a shared understanding of coastal biodiversity.
+
+Some participants frequently attend events and submit records, while others help out by identifying species through verification on iNaturalist- all contributions are equally valuable in building the dataset.
+
 ```{r overall-contributor-summary, results='asis', echo=FALSE}
 
 recorders_n <- n_distinct(BRPC_dat$user.login)
@@ -371,12 +482,14 @@ verifiers_n <- BRPC_dat %>%
   nrow()
 
 HTML(glue::glue(
-  "<p style='text-align:center;font-size:16px;margin:10px 0 20px 0;'>
+  "<p style='text-align:left;font-size:16px;margin:10px 0 20px 0;'>
   For all project data until end of March 2026, records were submitted by <strong>{recorders_n}</strong> recorders,
   and verified to research grade by <strong>{verifiers_n}</strong> identifiers.
   </p>"
 ))
 ```
+
+The top recorders and identifiers are presented below- thank you for your efforts!
 
 ```{r overall-top-recorders-panels, results='asis', echo=FALSE}
 library(dplyr)
@@ -565,6 +678,13 @@ div(
 )
 ```
 
+::: {style="height:20px;"}
+:::
+
+Each hub represents a local coastal site where volunteers return to record marine life over time. These locations form the backbone of the Big Rock Pool Challenge network.
+
+Because each hub has been running for different lengths of time, and is explored by different groups of people, the number of records varies, but every contribution adds valuable information about rock pool communities at that site.
+
 ```{r map}
 
 uk <- ne_countries(
@@ -649,7 +769,7 @@ ggplot() +
 
   labs(
     title = "Big Rock Pool Challenge Hubs",
-    subtitle = "Quarter 1 2026 observations"
+    subtitle = "Records as of 31/03/2026"
   ) +
 
   theme_void() +
@@ -668,7 +788,6 @@ ggplot() +
     )
   )
 ```
-
 
 ```{r records-by-hub}
 
@@ -696,7 +815,6 @@ all_data_hub_summary <- BRPC_dat %>%
 
 kable(all_data_hub_summary)
 ```
-
 
 ```{r hub-summary}
 all_hub_summaries <- all_iconic %>%
@@ -872,6 +990,14 @@ hub_site_photos <- tibble::tribble(
   "https://cdn.prod.website-files.com/6761e748382f7a483dc6c2ee/68f664397fe026047360f36a_shoeburyness%20team.jpg"
 )
 ```
+
+::: {style="height:20px;"}
+:::
+
+::: {style="height:20px;"}
+:::
+
+During BioBlitz Battle games, all species recorded earn a score. These scores reflect how often this species is recorded in the overall Big Rock Pool Challenge dataset. The higher scoring species are those that are recorded less often within the project and may represent more unusual or less commonly observed species. The highest scoring species recorded during this period are presented below.
 
 ```{r top-species-all-data}
 all_hub_top_species <- all_iconic %>%
@@ -1064,7 +1190,6 @@ for(h in unique(hub_iconic_small$hub)) {
 
 ```
 
-
 ```{r standout-species-render, results='asis', echo=FALSE}
 library(htmltools)
 
@@ -1170,7 +1295,12 @@ all_hub_report <- all_hub_summaries %>%
   distinct(hub, .keep_all = TRUE)
 ```
 
-## Hub Summaries
+::: {style="height:20px;"}
+:::
+
+### Hub Summaries
+
+A breakdown of records collected at each Big Rock Pool Challenge hub is presented below, including key contributors, iconic taxa grouping, and top scoring species.
 
 ```{r hubs-render, results='asis', echo=FALSE}
 library(htmltools)
@@ -1354,7 +1484,9 @@ out <- lapply(hubs, function(h) {
 tagList(out)
 ```
 
-# Quarter 1 2026 Data {#q1-2026}
+## Quarter 1 2026 Data {#q1-2026}
+
+This section presents only records from Quarter 1 of 2026 (January–March) to examine early-year biodiversity patterns across monitoring hubs. Seasonal variation is expected in intertidal ecosystems due to changes in temperature, storm exposure, and species life cycles.
 
 ```{r q1-summary}
 tagList(
@@ -1387,8 +1519,6 @@ ggplot(
     y = "Observations"
   )
 ```
-
-## Top Recorders
 
 ```{r q1-hub-recorder-summary}
 
@@ -1860,7 +1990,7 @@ q1_hub_report <- q1_hub_summaries %>%
 
 ```
 
-## Hub Summaries Q1
+### Hub Summaries Q1
 
 ```{r q1-hub-render}
 q1_hubs <- q1_hub_report$hub
