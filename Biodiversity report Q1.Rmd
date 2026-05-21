@@ -1,0 +1,2027 @@
+---
+title: "Big Rock Pool Challenge Biodiversity Report - Q1 2026"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    theme: null
+    css: "brand_styles.css"
+    includes:
+      before_body: "before_body.html"
+    self_contained: false
+---
+
+```{r setup-chunk, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE,
+  warning = FALSE,
+  message = FALSE,
+  fig.align = "center"
+)
+
+library(dplyr)
+library(ggplot2)
+library(knitr)
+library(kableExtra)
+library(sf)
+library(tidyr)
+library(vegan)
+library(ggrepel)
+library(scales)
+library(forcats)
+library(glue)
+library(purrr)
+library(rnaturalearth)
+library(viridis)
+library(htmltools)
+
+theme_set(
+  theme_minimal() +
+    theme(
+      legend.position = "right",
+      plot.caption = element_text(hjust = 0)
+    )
+)
+
+safe_id <- function(x) {
+  gsub("[^A-Za-z0-9]", "-", x)
+}
+
+get_col <- function(df, nm) {
+  if (nm %in% names(df)) df[[nm]] else rep(NA_character_, nrow(df))
+}
+
+default_avatar <- "https://cdn.prod.website-files.com/6761e748382f7a483dc6c262/68c02913eb9eedda1582018a_iNaturalist%20app.png"
+
+safe_img <- function(x) {
+  ifelse(is.na(x) | x == "", default_avatar, x)
+}
+
+safe_species_image <- function(photo_url,
+                               attribution,
+                               license_ok = TRUE) {
+
+  ok <- !is.na(photo_url) &
+        photo_url != "" &
+        license_ok
+
+  out_photo <- ifelse(ok, photo_url, default_avatar)
+
+  out_attr <- ifelse(ok, attribution, "")
+
+  tibble(
+    photo = out_photo,
+    attribution = out_attr
+  )
+}
+
+allowed_licenses <- c(
+  "cc-by",
+  "cc-by-sa",
+  "cc-by-nc",
+  "cc-by-nc-sa",
+  "cc0"
+)
+
+
+```
+
+```{r data-download, echo=FALSE}
+
+source("../../Ben/iNat API functions.R")
+
+iconic_lookup <- read.csv("../../Data/BRPC_iconic_taxa.csv")
+
+objs <- load("../../Data/rarity_scores2.1.RData")
+rarity_scores <- get(objs[1])
+
+load("../../Ben/BRPC_dat.RData")
+```
+
+```{r hub-setup}
+
+hub_sf <- tibble::tribble(
+  ~hub, ~lon, ~lat,
+  "Castle Beach", -5.06, 50.15,
+  "Lee-on-the-Solent", -1.20, 50.80,
+  "Beadnell Haven", -1.63, 55.56,
+  "Ovingdean", -0.08, 50.81,
+  "Shoeburyness", 0.78, 51.53,
+  "Menai Bridge", -4.16, 53.23,
+  "Mount Batten", -4.14, 50.36,
+  "Kilve Beach", -3.15, 51.20,
+  "East Sands", -2.79, 56.34
+) %>%
+  st_as_sf(coords = c("lon", "lat"), crs = 4326) %>%
+  st_transform(3857)
+```
+
+```{r data-pipeline}
+
+# ---------------------------------------
+# ALL DATA
+# ---------------------------------------
+
+BRPC_dat <- BRPC_dat %>%
+  mutate(
+    scientific_name = dplyr::coalesce(
+      get_col(., "scientific_name"),
+      get_col(., "taxon.name"),
+      get_col(., "taxon_name"),
+      get_col(., "species_guess")
+    )
+  )
+# ---------------------------------------
+# PROJECT DATA (up to Q1 end)
+# ---------------------------------------
+
+project_end <- as.Date("2026-03-31")
+
+BRPC_dat <- BRPC_dat %>%
+  mutate(observed_on = as.Date(observed_on)) %>%
+  filter(observed_on <= project_end)
+
+all_sf <- BRPC_dat %>%
+  mutate(
+    lon = purrr::map_dbl(
+      geojson.coordinates,
+      ~ if(length(.x) >= 1) .x[[1]] else NA_real_
+    ),
+    lat = purrr::map_dbl(
+      geojson.coordinates,
+      ~ if(length(.x) >= 2) .x[[2]] else NA_real_
+    )
+  ) %>%
+  filter(!is.na(lon), !is.na(lat)) %>%
+  st_as_sf(coords = c("lon", "lat"), crs = 4326) %>%
+  st_transform(3857)
+
+all_sf$hub <- hub_sf$hub[
+  st_nearest_feature(all_sf, hub_sf)
+]
+
+BRPC_dat <- all_sf %>%
+  st_drop_geometry()
+
+# ---------------------------------------
+# Q1 DATA
+# ---------------------------------------
+
+q1_base <- BRPC_dat %>%
+  filter(
+    observed_on >= "2026-01-01",
+    observed_on <= "2026-03-31"
+  )
+
+q1_sf <- q1_base %>%
+  mutate(
+    lon = purrr::map_dbl(geojson.coordinates, 1),
+    lat = purrr::map_dbl(geojson.coordinates, 2)
+  ) %>%
+  filter(!is.na(lon), !is.na(lat)) %>%
+  st_as_sf(coords = c("lon", "lat"), crs = 4326) %>%
+  st_transform(3857)
+
+q1_sf$hub <- hub_sf$hub[
+  st_nearest_feature(q1_sf, hub_sf)
+]
+
+q1_base$hub <- q1_sf$hub
+```
+
+```{r helper-funcitons}
+
+render_summary_card <- function(title, observations, contributors, species) {
+
+  div(
+    style = "
+      background:#ffffff;
+      border-radius:20px;
+      padding:26px;
+      margin:20px 0 30px 0;
+      box-shadow:0 4px 14px rgba(0,0,0,0.08);
+      border:1px solid #e8e8e8;
+      text-align:center;
+    ",
+
+    h2(title),
+
+    div(
+      style = "
+        display:inline-flex;
+        gap:18px;
+        flex-wrap:wrap;
+        justify-content:center;
+        align-items:center;
+        background:#f5f5f5;
+        padding:14px 22px;
+        border-radius:999px;
+        margin-top:10px;
+      ",
+
+      HTML(glue("
+        <span><strong>{comma(observations)}</strong> observations</span>
+        <span>·</span>
+        <span><strong>{comma(contributors)}</strong> contributors</span>
+        <span>·</span>
+        <span><strong>{comma(species)}</strong> species</span>
+      "))
+    )
+  )
+}
+```
+
+# All project data
+
+The Big Rock Pool Challenge commenced in October 2024 at hubs located at Castle Beach, Falmouth and Mount Batten, Plymouth. In October 2025, seven new hubs joined the Big Rock Pool Challenge:
+
+- Shoeburyness, Southend-on-Sea
+
+- Kilve Beach, Somerset
+
+- Beadnell Haven, Northumberland
+
+- East Sands, St Andrews
+
+- Lee-on-the-Solent, Hampshire
+
+- Menai Bridge, Bangor
+
+- Ovingdean, Brighton
+
+Data presented in this section of the report reflect all Big Rock Pool Challenge records from the start of the project in October 2024, until the end of Quarter 1 (end of March) 2026.
+
+To view data from Quarter 1 of 2026 only, please see the second half of this report, or [click here](#q1-2026).
+
+```{r overall-summary}
+
+tagList(
+
+  render_summary_card(
+    "Overall Project Summary",
+    observations = nrow(BRPC_dat),
+    contributors = n_distinct(BRPC_dat$user.login),
+    species = n_distinct(na.omit(BRPC_dat$scientific_name))
+  )
+)
+
+```
+
+```{r iconic-taxa}
+
+all_iconic <- BRPC_dat %>%
+  mutate(
+    ancestry_vec = strsplit(
+      ifelse(is.na(taxon.ancestry), "", taxon.ancestry),
+      "/"
+    ),
+
+    iconic_group = purrr::map_chr(ancestry_vec, function(x) {
+
+      x <- suppressWarnings(as.integer(x))
+
+      hit <- iconic_lookup$Common[
+        iconic_lookup$iNat_code %in% x
+      ]
+
+      if (length(hit) == 0) "Other" else hit[1]
+    })
+  )
+
+all_iconic_summary <- all_iconic %>%
+  count(iconic_group, sort = TRUE)
+
+ggplot(
+  all_iconic_summary,
+  aes(
+    x = reorder(iconic_group, n),
+    y = n,
+    fill = iconic_group
+  )
+) +
+  geom_col(show.legend = FALSE) +
+  coord_flip() +
+  scale_y_continuous(labels = comma) +
+  labs(
+    title = "Iconic Taxa Breakdown of records Across All Project Data",
+    x = NULL,
+    y = "Observations"
+  )
+```
+
+```{r q1-iconic-taxa}
+
+q1_iconic <- q1_base %>%
+  mutate(
+    ancestry_vec = strsplit(
+      ifelse(is.na(taxon.ancestry), "", taxon.ancestry),
+      "/"
+    ),
+
+    iconic_group = purrr::map_chr(ancestry_vec, function(x) {
+
+      x <- suppressWarnings(as.integer(x))
+
+      hit <- iconic_lookup$Common[
+        iconic_lookup$iNat_code %in% x
+      ]
+
+      if (length(hit) == 0) "Other" else hit[1]
+    })
+  )
+
+iconic_summary <- q1_iconic %>%
+  count(iconic_group, sort = TRUE)
+
+
+```
+
+```{r add-rarity-scores}
+
+# ---------------------------------------
+# Join rarity scores
+# ---------------------------------------
+
+all_iconic <- all_iconic %>%
+  left_join(
+    rarity_scores,
+    by = c("scientific_name" = "name")
+  )
+
+q1_iconic <- q1_iconic %>%
+  left_join(
+    rarity_scores,
+    by = c("scientific_name" = "name")
+  )
+```
+
+```{r overall-contributor-summary, results='asis', echo=FALSE}
+
+recorders_n <- n_distinct(BRPC_dat$user.login)
+
+verifiers_n <- BRPC_dat %>%
+  filter(!is.na(identifications)) %>%
+  pull(identifications) %>%
+  purrr::map_dfr(~{
+    if (is.null(.x) || !"user.login" %in% names(.x)) return(NULL)
+    tibble(user = .x$user.login)
+  }) %>%
+  filter(!is.na(user), user != "") %>%
+  distinct(user) %>%
+  nrow()
+
+HTML(glue::glue(
+  "<p style='text-align:center;font-size:16px;margin:10px 0 20px 0;'>
+  For all project data until end of March 2026, records were submitted by <strong>{recorders_n}</strong> recorders,
+  and verified to research grade by <strong>{verifiers_n}</strong> identifiers.
+  </p>"
+))
+```
+
+```{r overall-top-recorders-panels, results='asis', echo=FALSE}
+library(dplyr)
+library(htmltools)
+library(scales)
+
+default_avatar <- "https://cdn.prod.website-files.com/6761e748382f7a483dc6c262/68c02913eb9eedda1582018a_iNaturalist%20app.png"
+
+overall_recorders <- BRPC_dat %>%
+  filter(!is.na(user.login)) %>%
+  group_by(user.login) %>%
+  summarise(
+    records = n(),
+    icon = first(na.omit(user.icon_url)),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(records)) %>%
+  slice_head(n = 3) %>%
+  mutate(
+    icon = ifelse(is.na(icon) | icon == "", default_avatar, icon),
+    records = comma(records),
+
+    card_html = paste0(
+      "<div style='
+        flex:1;
+        min-width:120px;
+        max-width:180px;
+        background:#fafafa;
+        border-radius:14px;
+        padding:14px;
+        text-align:center;
+        border:1px solid #e6e6e6;
+      '>",
+paste0(
+  "<a href='", icon, "' target='_blank'>",
+  "<div style='
+    width:64px;
+    height:64px;
+    border-radius:50%;
+    margin:0 auto 10px auto;
+    background-image:url(\"", icon, "\");
+    background-size:cover;
+    background-position:center;
+    border:2px solid #ececec;
+  '></div>",
+  "</a>"
+),
+
+      "<div style='font-weight:600;font-size:14px;'>",
+      user.login,
+      "</div>",
+
+      "<div style='font-size:13px;color:#666;margin-top:4px;'>",
+      records,
+      " records</div>",
+
+      "</div>"
+    )
+  )
+
+div(
+  style = "
+    background:#ffffff;
+    border-radius:18px;
+    padding:20px;
+    box-shadow:0 3px 12px rgba(0,0,0,0.08);
+    border:1px solid #ececec;
+    margin:20px 0;
+  ",
+
+  h3("Overall Top Recorders", style = "text-align:center;margin-top:0;"),
+
+  div(
+    style = "
+      display:flex;
+      gap:16px;
+      justify-content:center;
+      flex-wrap:wrap;
+    ",
+    HTML(paste(overall_recorders$card_html, collapse = ""))
+  )
+)
+```
+
+```{r overall-top-identifiers-panels, results='asis', echo=FALSE}
+library(dplyr)
+library(purrr)
+library(tidyr)
+library(htmltools)
+library(scales)
+
+overall_identifiers <- BRPC_dat %>%
+  filter(!is.na(identifications)) %>%
+  select(identifications) %>%
+  mutate(
+    identifier = map(identifications, ~ {
+      if (is.null(.x) || nrow(.x) == 0 || !"user.login" %in% names(.x)) {
+        character(0)
+      } else {
+        .x$user.login
+      }
+    }),
+    icon = map(identifications, ~ {
+      if (is.null(.x) || nrow(.x) == 0 || !"user.icon_url" %in% names(.x)) {
+        character(0)
+      } else {
+        .x$user.icon_url
+      }
+    })
+  ) %>%
+  select(identifier, icon) %>%
+  unnest(c(identifier, icon)) %>%
+  filter(!is.na(identifier), identifier != "") %>%
+  group_by(identifier) %>%
+  summarise(
+    identifications = n(),
+    icon = first(na.omit(icon)),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(identifications)) %>%
+  slice_head(n = 3) %>%
+  mutate(
+    icon = ifelse(is.na(icon) | icon == "", default_avatar, icon),
+    identifications = comma(identifications),
+
+    card_html = paste0(
+      "<div style='
+        flex:1;
+        min-width:120px;
+        max-width:180px;
+        background:#fafafa;
+        border-radius:14px;
+        padding:14px;
+        text-align:center;
+        border:1px solid #e6e6e6;
+      '>",
+
+     paste0(
+  "<a href='", icon, "' target='_blank'>",
+  "<div style='
+    width:64px;
+    height:64px;
+    border-radius:50%;
+    margin:0 auto 10px auto;
+    background-image:url(\"", icon, "\");
+    background-size:cover;
+    background-position:center;
+    border:2px solid #ececec;
+  '></div>",
+  "</a>"
+),
+
+      "<div style='font-weight:600;font-size:14px;'>",
+      identifier,
+      "</div>",
+
+      "<div style='font-size:13px;color:#666;margin-top:4px;'>",
+      identifications,
+      " identifications</div>",
+
+      "</div>"
+    )
+  )
+
+div(
+  style = "
+    background:#ffffff;
+    border-radius:18px;
+    padding:20px;
+    box-shadow:0 3px 12px rgba(0,0,0,0.08);
+    border:1px solid #ececec;
+    margin:20px 0;
+  ",
+
+  h3("Overall Top Identifiers", style = "text-align:center;margin-top:0;"),
+
+  div(
+    style = "
+      display:flex;
+      gap:16px;
+      justify-content:center;
+      flex-wrap:wrap;
+    ",
+    HTML(paste(overall_identifiers$card_html, collapse = ""))
+  )
+)
+```
+
+```{r map}
+
+uk <- ne_countries(
+  scale = "medium",
+  country = "United Kingdom",
+  returnclass = "sf"
+) |>
+  st_transform(3857)
+
+hub_sf <- tibble::tribble(
+  ~hub, ~lon, ~lat,
+  "Castle Beach", -5.06, 50.15,
+  "Lee-on-the-Solent", -1.20, 50.80,
+  "Beadnell Haven", -1.63, 55.56,
+  "Ovingdean", -0.08, 50.81,
+  "Shoeburyness", 0.78, 51.53,
+  "Menai Bridge", -4.16, 53.23,
+  "Mount Batten", -4.14, 50.36,
+  "Kilve Beach", -3.15, 51.20,
+  "East Sands", -2.79, 56.34
+) |>
+  mutate(hub_id = row_number()) |>
+  st_as_sf(coords = c("lon", "lat"), crs = 4326) |>
+  st_transform(3857)
+
+q1_sf$hub <- hub_sf$hub[
+  sf::st_nearest_feature(q1_sf, hub_sf)
+]
+
+q1_base$hub <- q1_sf$hub
+
+q1_data <- sf::st_drop_geometry(q1_sf)
+
+hub_summary <- q1_data %>%
+  group_by(hub) %>%
+  summarise(
+    records = n(),
+    participants = n_distinct(user.login),
+    species = n_distinct(scientific_name),
+    .groups = "drop"
+  )
+
+hub_sf <- hub_sf %>%
+  left_join(hub_summary, by = "hub")
+
+ggplot() +
+
+  geom_sf(
+    data = uk,
+    fill = "grey95",
+    colour = "grey50"
+  ) +
+
+  geom_sf(
+    data = q1_sf,
+    colour = "grey70",
+    alpha = 0.25,
+    size = 0.3
+  ) +
+
+  geom_sf(
+    data = hub_sf,
+    aes(size = records),
+    colour = "#1f78b4",
+    fill = "#56B4E9",
+    shape = 21,
+    stroke = 1.2
+  ) +
+
+  geom_sf_text(
+    data = hub_sf,
+    aes(label = hub_id),
+    colour = "black",
+    fontface = "bold",
+    size = 3
+  ) +
+
+  scale_size(
+    range = c(4, 12),
+    name = "Observations"
+  ) +
+
+  labs(
+    title = "Big Rock Pool Challenge Hubs",
+    subtitle = "Quarter 1 2026 observations"
+  ) +
+
+  theme_void() +
+
+  theme(
+    legend.position = "right",
+
+    plot.title = element_text(
+      face = "bold",
+      size = 16
+    ),
+
+    plot.subtitle = element_text(
+      size = 11,
+      margin = margin(b = 10)
+    )
+  )
+```
+
+
+```{r records-by-hub}
+
+all_data_hub_summary <- BRPC_dat %>%
+  group_by(hub) %>%
+  summarise(
+    observations = n(),
+    contributors = n_distinct(user.login),
+    species = n_distinct(scientific_name),
+    .groups = "drop"
+  ) %>%
+  left_join(
+    st_drop_geometry(hub_sf) %>%
+      select(hub_id, hub),
+    by = "hub"
+  ) %>%
+  select(
+    Hub_ID = hub_id,
+    Hub = hub,
+    Observations = observations,
+    Contributors = contributors,
+    Species = species
+  ) %>%
+  arrange(Hub_ID)
+
+kable(all_data_hub_summary)
+```
+
+
+```{r hub-summary}
+all_hub_summaries <- all_iconic %>%
+  group_by(hub) %>%
+  summarise(
+    records = n(),
+    contributors = n_distinct(user.login),
+    species = n_distinct(scientific_name),
+
+    top_observer = names(sort(table(user.login), decreasing = TRUE))[1],
+    top_observer_n = max(table(user.login)),
+
+    .groups = "drop"
+  )
+```
+
+```{r hub-identifier-summary}
+
+all_hub_top_identifiers <- all_iconic %>%
+  filter(!is.na(identifications)) %>%
+  select(hub, identifications) %>%
+  tidyr::unnest(identifications) %>%
+  filter(!is.na(user.login)) %>%
+  group_by(hub, user.login) %>%
+  summarise(
+    identifications = n(),
+    icon = first(user.icon_url),
+    .groups = "drop"
+  ) %>%
+  group_by(hub) %>%
+  arrange(desc(identifications)) %>%
+  slice_head(n = 3) %>%
+  mutate(
+
+   icon = ifelse(is.na(icon) | icon == "", default_avatar, icon),
+
+    card_html = paste0(
+      "<div style='
+        flex:1;
+        min-width:120px;
+        max-width:180px;
+        background:#fafafa;
+        border-radius:14px;
+        padding:14px;
+        text-align:center;
+      '>",
+
+      "<img src='", icon, "'
+        style='
+          width:64px;
+          height:64px;
+          border-radius:50%;
+          object-fit:cover;
+          margin-bottom:10px;
+          border:2px solid #e6e6e6;
+        '>",
+
+      "<div style='font-weight:600;font-size:14px;'>",
+      user.login,
+      "</div>",
+
+      "<div style='font-size:13px;color:#666;margin-top:4px;'>",
+      comma(identifications),
+      " identifications</div>",
+
+      "</div>"
+    )
+  ) %>%
+  summarise(
+    top_identifiers_html = paste(card_html, collapse = ""),
+    .groups = "drop"
+  )
+```
+
+```{r top-recorders}
+all_hub_top_recorders <- all_iconic %>%
+  filter(!is.na(user.login)) %>%
+  group_by(hub, user.login) %>%
+  summarise(
+    records = n(),
+    icon = first(user.icon_url),
+    .groups = "drop"
+  ) %>%
+  group_by(hub) %>%
+  arrange(desc(records)) %>%
+  slice_head(n = 3) %>%
+  mutate(
+
+   icon = ifelse(is.na(icon) | icon == "", default_avatar, icon),
+
+    card_html = paste0(
+      "<div style='
+        flex:1;
+        min-width:120px;
+        max-width:180px;
+        background:#fafafa;
+        border-radius:14px;
+        padding:14px;
+        text-align:center;
+      '>",
+
+      "<img src='", icon, "'
+        style='
+          width:64px;
+          height:64px;
+          border-radius:50%;
+          object-fit:cover;
+          margin-bottom:10px;
+          border:2px solid #e6e6e6;
+        '>",
+
+      "<div style='font-weight:600;font-size:14px;'>",
+      user.login,
+      "</div>",
+
+      "<div style='font-size:13px;color:#666;margin-top:4px;'>",
+      comma(records),
+      " observations</div>",
+
+      "</div>"
+    )
+  ) %>%
+  summarise(
+    top_recorders_html = paste(card_html, collapse = ""),
+    .groups = "drop"
+  )
+```
+
+```{r load-hub-logos}
+hub_logos <- tibble::tribble(
+  ~hub, ~logo_url,
+  "Castle Beach", "https://cdn.prod.website-files.com/6761e748382f7a483dc6c2ee/68e52dddfca602b7e70fd34f_Castle%20Beach_background.png",
+  "Lee-on-the-Solent", "https://cdn.prod.website-files.com/6761e748382f7a483dc6c2ee/68f7a42bf2ced5a97ff1d7cc_Lee-on-the-Solent_background.png",
+  "Beadnell Haven", "https://cdn.prod.website-files.com/6761e748382f7a483dc6c2ee/68ee485ce2c8ba073e90f031_Beadnell%20Haven_background.png",
+  "Ovingdean", "https://cdn.prod.website-files.com/6761e748382f7a483dc6c2ee/68e7b2e3ee0622ac5288d0ea_Ovingdean%20Beach_background.png",
+  "Shoeburyness", "https://cdn.prod.website-files.com/6761e748382f7a483dc6c2ee/69023480819461010c5b7777_Shoeburyness_background.png",
+  "Menai Bridge", "https://cdn.prod.website-files.com/6761e748382f7a483dc6c2ee/68f66091a36dd2e5a7f195a6_Menai%20Bridge_background.png",
+  "Mount Batten", "https://cdn.prod.website-files.com/6761e748382f7a483dc6c2ee/68ee4a28c6ce42f665792558_Mount%20Batten_background.png",
+  "Kilve Beach", "https://cdn.prod.website-files.com/6761e748382f7a483dc6c2ee/68e7af1e8dbb099b8d5242b3_Kilve%20Beach_background.png",
+  "East Sands", "https://cdn.prod.website-files.com/6761e748382f7a483dc6c2ee/68e7b07fedeb13e53466355c_East%20Sands%20Beach_background.png"
+)
+```
+
+```{r load-hub-images}
+hub_site_photos <- tibble::tribble(
+  ~hub, ~site_photo,
+
+  "Mount Batten",
+  "https://cdn.prod.website-files.com/6761e748382f7a483dc6c262/687a3d7146a339fab83b27e5_Plymouth_lead_volunteers.jpg",
+
+  "Castle Beach",
+  "https://cdn.prod.website-files.com/6761e748382f7a483dc6c2ee/68e525f5687223457755b1ef_4%20-%20Alexander%20Lydon.png",
+
+  "Menai Bridge",
+  "https://cdn.prod.website-files.com/6761e748382f7a483dc6c2ee/68f65e11c5ec88584d09a9f8_menai%20bridge%20site.jpg",
+
+  "Ovingdean",
+  "https://cdn.prod.website-files.com/6761e748382f7a483dc6c2ee/68e7b2c1af58aa97a264790e_IMG_3893%20-%20Sophie%20Crocker.jpeg",
+
+  "East Sands",
+  "https://cdn.prod.website-files.com/6761e748382f7a483dc6c2ee/68f662a74fb848dae79f6a46_WhatsApp%20Image%202025-10-20%20at%2017.24.27_a9ec7b97.jpg",
+
+  "Kilve Beach",
+  "https://cdn.prod.website-files.com/6761e748382f7a483dc6c2ee/68e7ae6ad6b9191fe5bbf189_20250905_142406%20-%20Athena%20Allen%20(1).jpg",
+
+  "Beadnell Haven",
+  "https://cdn.prod.website-files.com/6761e748382f7a483dc6c2ee/68f663d2083ef94524503f95_team%20compressed.jpg",
+
+  "Lee-on-the-Solent",
+  "https://cdn.prod.website-files.com/6761e748382f7a483dc6c2ee/68f7a41bfa2bbfcef8002094_IMG_20251018_142731.jpg",
+
+  "Shoeburyness",
+  "https://cdn.prod.website-files.com/6761e748382f7a483dc6c2ee/68f664397fe026047360f36a_shoeburyness%20team.jpg"
+)
+```
+
+```{r top-species-all-data}
+all_hub_top_species <- all_iconic %>%
+  group_by(hub, scientific_name) %>%
+  summarise(
+    Score = max(Score, na.rm = TRUE),
+    photo = first(na.omit(taxon.default_photo.medium_url)),
+    photo_attribution = first(na.omit(taxon.default_photo.attribution)),
+    photo_license = first(na.omit(taxon.default_photo.license_code)),
+    recorder = first(user.login),
+    .groups = "drop"
+  ) %>%
+
+  mutate(
+    license_ok = photo_license %in% allowed_licenses,
+
+    photo = ifelse(
+      license_ok & !is.na(photo) & photo != "",
+      photo,
+      default_avatar
+    ),
+
+    attribution = ifelse(
+      license_ok,
+      photo_attribution,
+      ""
+    )
+  ) %>%
+
+  arrange(hub, desc(Score)) %>%
+  group_by(hub) %>%
+  slice_head(n = 3) %>%
+
+  mutate(
+    img_html = paste0(
+
+      "<div style='
+        flex:1;
+        min-width:180px;
+        max-width:220px;
+        background:#ffffff;
+        border-radius:14px;
+        padding:14px;
+        box-shadow:0 2px 8px rgba(0,0,0,0.08);
+        border:1px solid #ececec;
+        text-align:center;
+      '>",
+
+      "<img src='", photo,
+      "' style='
+          width:100%;
+          height:140px;
+          object-fit:cover;
+          border-radius:10px;
+          margin-bottom:10px;
+      '>",
+
+      "<div style='font-size:10px;color:#777;margin-bottom:8px;'>",
+      attribution,
+      "</div>",
+
+      "<div style='font-style:italic;font-size:14px;margin-bottom:6px;'>",
+      scientific_name,
+      "</div>",
+
+      "<div style='font-size:12px;color:#666;margin-bottom:6px;'>",
+      "Rarity score: ", round(Score, 1),
+      "</div>",
+
+      "<div style='font-size:11px;color:#444;'>",
+      "<strong>Observed by</strong><br>",
+      recorder,
+      "</div>",
+
+      "</div>"
+    )
+  ) %>%
+
+  summarise(
+    top_species_html = paste0(
+      "<div style='display:flex;gap:16px;justify-content:center;flex-wrap:wrap;margin-top:12px;'>",
+      paste(img_html, collapse = ""),
+      "</div>"
+    ),
+    .groups = "drop"
+  )
+```
+
+```{r notable_species}
+
+notable_species <- q1_iconic %>%
+  filter(!is.na(Score)) %>%
+  group_by(scientific_name) %>%
+  summarise(
+    Score = max(Score, na.rm = TRUE),
+    observations = n(),
+    photo = first(na.omit(taxon.default_photo.medium_url)),
+    recorder = first(user.login),
+    hub = first(hub),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(Score)) %>%
+  slice_head(n = 10)
+```
+
+```{r hub-iconic-plots, echo=FALSE, warning=FALSE, message=FALSE}
+
+dir.create("hub_plots", showWarnings = FALSE)
+
+hub_iconic_small <- q1_iconic %>%
+  count(hub, iconic_group) %>%
+  group_by(hub) %>%
+  mutate(prop = n / sum(n))
+
+for(h in unique(hub_iconic_small$hub)) {
+
+  dat <- hub_iconic_small %>%
+    filter(hub == h)
+
+  p <- ggplot(dat,
+              aes(x = reorder(iconic_group, prop),
+                  y = prop,
+                  fill = iconic_group)) +
+    geom_col(show.legend = FALSE) +
+    coord_flip() +
+    scale_y_continuous(labels = scales::percent) +
+    labs(
+      x = NULL,
+      y = NULL
+    ) +
+    theme_minimal(base_size = 10) +
+    theme(
+      plot.margin = margin(2,2,2,2),
+      panel.grid.minor = element_blank(),
+      axis.text.y = element_text(size = 8),
+      axis.text.x = element_text(size = 7)
+    )
+
+  ggsave(
+    filename = paste0("hub_plots/", safe_id(h), ".jpg"),
+    plot = p,
+    width = 4,
+    height = 2.8,
+    dpi = 120
+  )
+}
+```
+
+```{r all-notable-species, results='asis', echo=FALSE}
+# ---------------------------------------
+# All-time standout species
+ all_time_top <- BRPC_dat %>%
+  left_join(
+    rarity_scores,
+    by = c("scientific_name" = "name")
+  ) %>%
+  filter(!is.na(Score)) %>%
+  group_by(scientific_name) %>%
+  summarise(
+    Score = max(Score, na.rm = TRUE),
+
+    photo = first(na.omit(taxon.default_photo.medium_url)),
+    photo_attribution = first(na.omit(taxon.default_photo.attribution)),
+    photo_license = first(na.omit(taxon.default_photo.license_code)),
+
+    recorder = first(user.login),
+    hub = first(hub),
+
+    .groups = "drop"
+  ) %>%
+
+  mutate(
+    license_ok = photo_license %in% allowed_licenses,
+
+    photo = ifelse(
+      license_ok & !is.na(photo) & photo != "",
+      photo,
+      default_avatar
+    ),
+
+    attribution = ifelse(
+      license_ok,
+      photo_attribution,
+      ""
+    )
+  ) %>%
+
+  arrange(desc(Score)) %>%
+  slice_head(n = 3)
+
+```
+
+
+```{r standout-species-render, results='asis', echo=FALSE}
+library(htmltools)
+
+render_species_cards <- function(dat, title_text) {
+
+  cards <- lapply(seq_len(nrow(dat)), function(i) {
+
+    row <- dat[i, ]
+
+    div(
+      style = "
+        flex:1;
+        min-width:260px;
+        max-width:320px;
+        background:#ffffff;
+        border-radius:18px;
+        padding:20px;
+        box-shadow:0 3px 12px rgba(0,0,0,0.08);
+        border:1px solid #e6e6e6;
+        text-align:center;
+      ",
+
+tags$a(
+  href = row$photo,
+  target = "_blank",
+  tags$div(
+    style = sprintf(
+      "width:100%%;height:140px;border-radius:10px;background-image:url('%s');background-size:cover;background-position:center;",
+      row$photo
+    )
+  )
+),
+
+      # FIX: must come from row, not global
+      tags$div(
+        style = "font-size:10px;color:#777;margin-top:6px;",
+        HTML(row$attribution %||% "")
+      ),
+
+      div(
+        style = "
+          display:inline-block;
+          padding:8px 14px;
+          border-radius:999px;
+          background:#f5f5f5;
+          font-size:15px;
+          margin-bottom:14px;
+        ",
+        strong("Score: "),
+        round(row$Score, 1)
+      ),
+
+      tags$p(
+        style = "margin-bottom:6px;",
+        strong("Observed by"), tags$br(),
+        row$recorder
+      ),
+
+      tags$p(
+        style = "margin-top:0;",
+        strong("Hub"), tags$br(),
+        row$hub
+      )
+    )
+  })
+
+  tagList(
+    tags$h2(
+      style = "margin-top:40px;margin-bottom:24px;text-align:center;",
+      title_text
+    ),
+    div(
+      style = "
+        display:flex;
+        gap:24px;
+        justify-content:center;
+        flex-wrap:wrap;
+        margin-bottom:50px;
+      ",
+      cards
+    )
+  )
+}
+
+render_species_cards(
+  all_time_top,
+  "Highest Scoring Species Across All Project Data"
+)
+```
+
+```{r all-hub-report-join}
+all_hub_report <- all_hub_summaries %>%
+  left_join(all_hub_top_recorders, by = "hub") %>%
+  left_join(all_hub_top_identifiers, by = "hub") %>%
+  left_join(all_iconic %>%
+              group_by(hub) %>%
+              summarise(top_groups = paste(names(sort(table(iconic_group), decreasing = TRUE)[1:3]), collapse = ", "),
+                        .groups = "drop"),
+            by = "hub") %>%
+  left_join(all_hub_top_species, by = "hub") %>%
+  left_join(hub_logos, by = "hub") %>%
+  left_join(hub_site_photos, by = "hub") %>%
+  distinct(hub, .keep_all = TRUE)
+```
+
+## Hub Summaries
+
+```{r hubs-render, results='asis', echo=FALSE}
+library(htmltools)
+library(dplyr)
+library(scales)
+
+default_avatar <- "https://cdn.prod.website-files.com/6761e748382f7a483dc6c262/68c02913eb9eedda1582018a_iNaturalist%20app.png"
+
+hubs <- all_hub_report$hub
+hubs <- hubs[!is.na(hubs)]
+
+out <- lapply(hubs, function(h) {
+
+  row <- all_hub_report %>%
+    filter(hub == h) %>%
+    slice(1)
+
+  div(
+
+    style = "
+      background:#ffffff;
+      border-radius:20px;
+      padding:28px;
+      margin-bottom:36px;
+      box-shadow:0 4px 14px rgba(0,0,0,0.08);
+      border:1px solid #e8e8e8;
+      width:100%;
+      box-sizing:border-box;
+      overflow:hidden;
+    ",
+
+    # ================= HEADER =================
+    div(
+      style = "text-align:center;margin-bottom:24px;",
+
+      img(
+        src = row$logo_url,
+        onerror = paste0("this.src='", default_avatar, "';"),
+        style = "
+          width:180px;
+          height:180px;
+          object-fit:contain;
+          margin-bottom:14px;
+        "
+      ),
+
+      h2(h, style = "margin:0;font-size:28px;"),
+
+      div(
+        style = "
+          display:inline-block;
+          margin-top:14px;
+          padding:10px 18px;
+          border-radius:999px;
+          background:#f5f5f5;
+          font-size:14px;
+        ",
+        strong(comma(row$records)), " observations · ",
+        strong(comma(row$contributors)), " contributors · ",
+        strong(comma(row$species)), " species"
+      )
+    ),
+
+    # ================= GRID =================
+    div(
+      style = "
+        display:grid;
+        grid-template-columns:1fr 1fr;
+        gap:22px;
+        width:100%;
+      ",
+
+      # ---- SITE PHOTO ----
+      div(
+        style = "
+          background:#fafafa;
+          border-radius:18px;
+          padding:18px;
+          border:1px solid #ececec;
+        ",
+
+        h3( style = "margin-top:0;text-align:center;"),
+
+        img(
+          src = row$site_photo,
+          onerror = paste0("this.src='", default_avatar, "';"),
+          style = "
+            width:100%;
+            height:320px;
+            object-fit:cover;
+            border-radius:12px;
+          "
+        )
+      ),
+
+      # ---- ICONIC TAXA ----
+      div(
+        style = "
+          background:#fafafa;
+          border-radius:18px;
+          padding:18px;
+          border:1px solid #ececec;
+          text-align:center;
+        ",
+
+        h3("Iconic Taxa Composition", style = "margin-top:0;"),
+
+        img(
+          src = paste0("hub_plots/", safe_id(h), ".jpg"),
+          onerror = paste0("this.src='", default_avatar, "';"),
+          style = "
+            width:100%;
+            max-width:480px;
+            border-radius:10px;
+          "
+        ),
+
+        tags$p(
+          style = "margin-top:16px;font-size:13px;color:#555;",
+          strong("Top iconic groups: "),
+          row$top_groups
+        )
+      ),
+
+      # ---- TOP RECORDERS ----
+      div(
+        style = "
+          background:#fafafa;
+          border-radius:18px;
+          padding:18px;
+          border:1px solid #ececec;
+        ",
+
+        h3("Top Recorders", style = "text-align:center;"),
+
+        div(
+          style = "
+            display:flex;
+            gap:16px;
+            justify-content:center;
+            flex-wrap:wrap;
+          ",
+          HTML(row$top_recorders_html)
+        )
+      ),
+
+      # ---- TOP IDENTIFIERS ----
+      div(
+        style = "
+          background:#fafafa;
+          border-radius:18px;
+          padding:18px;
+          border:1px solid #ececec;
+        ",
+
+        h3("Top Identifiers", style = "text-align:center;"),
+
+        div(
+          style = "
+            display:flex;
+            gap:16px;
+            justify-content:center;
+            flex-wrap:wrap;
+          ",
+          HTML(row$top_identifiers_html)
+        )
+      )
+    ),
+
+    # ================= SPECIES =================
+    div(
+      style = "margin-top:28px;",
+
+      h3("Top Scoring Species", style = "text-align:center;margin-bottom:18px;"),
+
+      HTML(row$top_species_html)
+    )
+  )
+})
+
+tagList(out)
+```
+
+# Quarter 1 2026 Data {#q1-2026}
+
+```{r q1-summary}
+tagList(
+
+  render_summary_card(
+    "Quarter 1 2026 Summary",
+    observations = nrow(q1_base),
+    contributors = n_distinct(q1_base$user.login),
+    species = n_distinct(na.omit(q1_base$scientific_name))
+  )
+)
+
+```
+
+```{r iconic-q1-plot}
+ggplot(
+  iconic_summary,
+  aes(
+    x = reorder(iconic_group, n),
+    y = n,
+    fill = iconic_group
+  )
+) +
+  geom_col(show.legend = FALSE) +
+  coord_flip() +
+  scale_y_continuous(labels = comma) +
+  labs(
+    title = "Iconic Taxa Recorded During Q1 2026",
+    x = NULL,
+    y = "Observations"
+  )
+```
+
+## Top Recorders
+
+```{r q1-hub-recorder-summary}
+
+q1_recorders <- q1_base %>%
+  filter(!is.na(user.login)) %>%
+  group_by(user.login) %>%
+  summarise(
+    records = n(),
+    icon = first(na.omit(user.icon_url)),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(records)) %>%
+  slice_head(n = 3) %>%
+  mutate(
+    icon = ifelse(is.na(icon) | icon == "", default_avatar, icon),
+    records = comma(records),
+
+    card_html = paste0(
+      "<div style='
+        flex:1;
+        min-width:120px;
+        max-width:180px;
+        background:#fafafa;
+        border-radius:14px;
+        padding:14px;
+        text-align:center;
+        border:1px solid #e6e6e6;
+      '>",
+
+      "<img src='", icon, "'
+        style='
+          width:64px;
+          height:64px;
+          border-radius:50%;
+          margin-bottom:10px;
+          border:2px solid #ececec;
+          object-fit:cover;
+        '>",
+
+      "<div style='font-weight:600;font-size:14px;'>",
+      user.login,
+      "</div>",
+
+      "<div style='font-size:13px;color:#666;margin-top:4px;'>",
+      records,
+      " records</div>",
+
+      "</div>"
+    )
+  )
+
+div(
+  style = "
+    background:#ffffff;
+    border-radius:18px;
+    padding:20px;
+    box-shadow:0 3px 12px rgba(0,0,0,0.08);
+    border:1px solid #ececec;
+    margin:20px 0;
+  ",
+
+  h3("Q1 Top Recorders", style = "text-align:center;margin-top:0;"),
+
+  div(
+    style = "
+      display:flex;
+      gap:16px;
+      justify-content:center;
+      flex-wrap:wrap;
+    ",
+    HTML(paste(q1_recorders$card_html, collapse = ""))
+  )
+)
+```
+
+```{r q1-top-identifiers}
+
+q1_identifiers <- q1_base %>%
+  filter(!is.na(identifications)) %>%
+  select(identifications) %>%
+  mutate(
+    identifier = map(identifications, ~ {
+      if (is.null(.x) || nrow(.x) == 0 || !"user.login" %in% names(.x)) {
+        character(0)
+      } else {
+        .x$user.login
+      }
+    }),
+    icon = map(identifications, ~ {
+      if (is.null(.x) || nrow(.x) == 0 || !"user.icon_url" %in% names(.x)) {
+        character(0)
+      } else {
+        .x$user.icon_url
+      }
+    })
+  ) %>%
+  select(identifier, icon) %>%
+  unnest(c(identifier, icon)) %>%
+  filter(!is.na(identifier), identifier != "") %>%
+  group_by(identifier) %>%
+  summarise(
+    identifications = n(),
+    icon = first(na.omit(icon)),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(identifications)) %>%
+  slice_head(n = 3) %>%
+  mutate(
+    icon = ifelse(is.na(icon) | icon == "", default_avatar, icon),
+    identifications = comma(identifications),
+
+    card_html = paste0(
+      "<div style='
+        flex:1;
+        min-width:120px;
+        max-width:180px;
+        background:#fafafa;
+        border-radius:14px;
+        padding:14px;
+        text-align:center;
+        border:1px solid #e6e6e6;
+      '>",
+
+      "<img src='", icon, "'
+        style='
+          width:64px;
+          height:64px;
+          border-radius:50%;
+          margin-bottom:10px;
+          border:2px solid #ececec;
+          object-fit:cover;
+        '>",
+
+      "<div style='font-weight:600;font-size:14px;'>",
+      identifier,
+      "</div>",
+
+      "<div style='font-size:13px;color:#666;margin-top:4px;'>",
+      identifications,
+      " identifications</div>",
+
+      "</div>"
+    )
+  )
+
+div(
+  style = "
+    background:#ffffff;
+    border-radius:18px;
+    padding:20px;
+    box-shadow:0 3px 12px rgba(0,0,0,0.08);
+    border:1px solid #ececec;
+    margin:20px 0;
+  ",
+
+  h3("Q1 Top Identifiers", style = "text-align:center;margin-top:0;"),
+
+  div(
+    style = "
+      display:flex;
+      gap:16px;
+      justify-content:center;
+      flex-wrap:wrap;
+    ",
+    HTML(paste(q1_identifiers$card_html, collapse = ""))
+  )
+)
+```
+
+```{r q1-hub-summary}
+
+q1_hub_summaries <- q1_iconic %>%
+  group_by(hub) %>%
+  summarise(
+    records = n(),
+    contributors = n_distinct(user.login),
+    species = n_distinct(scientific_name),
+    .groups = "drop"
+  )
+
+```
+
+```{r q1-hub-top-groups}
+
+q1_hub_top_groups <- q1_iconic %>%
+  count(hub, iconic_group, sort = TRUE) %>%
+  group_by(hub) %>%
+  slice_head(n = 3) %>%
+  summarise(
+    top_groups = paste(iconic_group, collapse = ", "),
+    .groups = "drop"
+  )
+
+```
+
+```{r q1-hub-top-species}
+q1_hub_top_species <- q1_iconic %>%
+  filter(!is.na(Score)) %>%
+
+  group_by(hub, scientific_name) %>%
+
+  arrange(desc(Score)) %>%
+
+  slice(1) %>%
+
+  ungroup() %>%
+
+  transmute(
+    hub,
+    scientific_name,
+    Score,
+
+    photo = taxon.default_photo.medium_url,
+    photo_attribution = taxon.default_photo.attribution,
+    photo_license = taxon.default_photo.license_code,
+
+    recorder = user.login
+  ) %>%
+
+  mutate(
+    license_ok = photo_license %in% allowed_licenses,
+
+    photo = ifelse(
+      license_ok & !is.na(photo) & photo != "",
+      photo,
+      default_avatar
+    ),
+
+    attribution = ifelse(
+      license_ok &
+      !is.na(photo_attribution) &
+      photo_attribution != "",
+      photo_attribution,
+      ""
+    )
+  ) %>%
+
+  arrange(hub, desc(Score)) %>%
+
+  group_by(hub) %>%
+
+  slice_head(n = 3) %>%
+
+  mutate(
+    img_html = paste0(
+      "<div style='
+        flex:1;
+        min-width:180px;
+        max-width:220px;
+        background:#ffffff;
+        border-radius:14px;
+        padding:14px;
+        box-shadow:0 2px 8px rgba(0,0,0,0.08);
+        border:1px solid #ececec;
+        text-align:center;
+      '>",
+
+      "<img src='", photo, "' style='
+          width:100%;
+          height:140px;
+          object-fit:cover;
+          border-radius:10px;
+          margin-bottom:6px;
+      '>",
+
+      "<div style='font-size:10px;color:#777;margin-bottom:8px;'>",
+      attribution,
+      "</div>",
+
+      "<div style='font-style:italic;font-size:14px;margin-bottom:8px;'>",
+      scientific_name,
+      "</div>",
+
+      "<div style='font-size:12px;color:#666;margin-bottom:8px;'>",
+      "Rarity score: ", round(Score, 1),
+      "</div>",
+
+      "<div style='font-size:12px;color:#444;line-height:1.4;'>",
+      "<strong>Observed by</strong><br>",
+      recorder,
+      "</div>",
+
+      "</div>"
+    )
+  ) %>%
+
+  summarise(
+    top_species_html = paste0(
+      "<div style='display:flex;gap:16px;justify-content:center;flex-wrap:wrap;margin-top:12px;'>",
+      paste(img_html, collapse = ""),
+      "</div>"
+    ),
+    .groups = "drop"
+  )
+```
+
+```{r q1-hub-top-recorders}
+
+q1_hub_top_recorders <- q1_iconic %>%
+  filter(!is.na(user.login)) %>%
+  group_by(hub, user.login) %>%
+  summarise(
+    records = n(),
+    icon = first(user.icon_url),
+    .groups = "drop"
+  ) %>%
+  group_by(hub) %>%
+  arrange(desc(records)) %>%
+  slice_head(n = 3) %>%
+  mutate(
+
+    icon = ifelse(is.na(icon) | icon == "", default_avatar, icon),
+
+    card_html = paste0(
+      "<div style='
+        flex:1;
+        min-width:120px;
+        max-width:180px;
+        background:#fafafa;
+        border-radius:14px;
+        padding:14px;
+        text-align:center;
+      '>",
+
+      "<img src='", icon, "'
+        style='
+          width:64px;
+          height:64px;
+          border-radius:50%;
+          object-fit:cover;
+          margin-bottom:10px;
+          border:2px solid #e6e6e6;
+        '>",
+
+      "<div style='font-weight:600;font-size:14px;'>",
+      user.login,
+      "</div>",
+
+      "<div style='font-size:13px;color:#666;margin-top:4px;'>",
+      comma(records),
+      " observations</div>",
+
+      "</div>"
+    )
+  ) %>%
+  summarise(
+    top_recorders_html = paste(card_html, collapse = ""),
+    .groups = "drop"
+  )
+
+```
+
+```{r q1-hub-top-identifiers}
+
+q1_hub_top_identifiers <- q1_iconic %>%
+  filter(!is.na(identifications)) %>%
+  select(hub, identifications) %>%
+  tidyr::unnest(identifications) %>%
+  filter(!is.na(user.login)) %>%
+  group_by(hub, user.login) %>%
+  summarise(
+    identifications = n(),
+    icon = first(user.icon_url),
+    .groups = "drop"
+  ) %>%
+  group_by(hub) %>%
+  arrange(desc(identifications)) %>%
+  slice_head(n = 3) %>%
+  mutate(
+
+    icon = ifelse(is.na(icon) | icon == "", default_avatar, icon),
+
+    card_html = paste0(
+      "<div style='
+        flex:1;
+        min-width:120px;
+        max-width:180px;
+        background:#fafafa;
+        border-radius:14px;
+        padding:14px;
+        text-align:center;
+      '>",
+
+      "<img src='", icon, "'
+        style='
+          width:64px;
+          height:64px;
+          border-radius:50%;
+          object-fit:cover;
+          margin-bottom:10px;
+          border:2px solid #e6e6e6;
+        '>",
+
+      "<div style='font-weight:600;font-size:14px;'>",
+      user.login,
+      "</div>",
+
+      "<div style='font-size:13px;color:#666;margin-top:4px;'>",
+      comma(identifications),
+      " identifications</div>",
+
+      "</div>"
+    )
+  ) %>%
+  summarise(
+    top_identifiers_html = paste(card_html, collapse = ""),
+    .groups = "drop"
+  )
+
+```
+
+```{r q1-top-species-card}
+q1_top <- q1_iconic %>%
+  filter(!is.na(Score)) %>%
+  group_by(scientific_name) %>%
+  summarise(
+    n = n(),
+
+    Score = max(Score, na.rm = TRUE),
+
+    photo = first(na.omit(taxon.default_photo.medium_url)),
+    photo_attribution = first(na.omit(taxon.default_photo.attribution)),
+    photo_license = first(na.omit(taxon.default_photo.license_code)),
+
+    recorder = first(user.login),
+    hub = first(hub),
+
+    .groups = "drop"
+  ) %>%
+
+  mutate(
+    license_ok = photo_license %in% allowed_licenses,
+
+    photo = ifelse(
+      license_ok & !is.na(photo) & photo != "",
+      photo,
+      default_avatar
+    ),
+
+    attribution = ifelse(
+      license_ok,
+      photo_attribution,
+      ""
+    )
+  ) %>%
+
+  arrange(desc(Score)) %>%
+  slice_head(n = 3)
+
+```
+
+```{r q1-species-render, results='asis', echo=FALSE}
+render_species_cards(
+  q1_top,
+  "Highest Scoring Species Recorded During Q1 2026"
+)
+```
+
+```{r q1-hub-report}
+
+q1_hub_report <- q1_hub_summaries %>%
+  left_join(q1_hub_top_recorders, by = "hub") %>%
+  left_join(q1_hub_top_identifiers, by = "hub") %>%
+  left_join(q1_hub_top_groups, by = "hub") %>%
+  left_join(q1_hub_top_species, by = "hub") %>%
+  left_join(hub_logos, by = "hub") %>%
+  left_join(hub_site_photos, by = "hub") %>%
+  distinct(hub, .keep_all = TRUE)
+
+```
+
+## Hub Summaries Q1
+
+```{r q1-hub-render}
+q1_hubs <- q1_hub_report$hub
+q1_hubs <- q1_hubs[!is.na(q1_hubs)]
+
+out <- lapply(q1_hubs, function(h) {
+
+  row <- q1_hub_report %>%
+    filter(hub == h) %>%
+    slice(1)
+
+  div(
+    style = "
+      background:#ffffff;
+      border-radius:20px;
+      padding:28px;
+      margin-bottom:36px;
+      box-shadow:0 4px 14px rgba(0,0,0,0.08);
+      border:1px solid #e8e8e8;
+      width:100%;
+      box-sizing:border-box;
+      overflow:hidden;
+    "
+    ,
+
+    # HEADER
+    div(
+      style = "text-align:center;margin-bottom:24px;",
+
+      img(
+        src = row$logo_url,
+        onerror = paste0("this.src='", default_avatar, "';"),
+        style = "
+          width:180px;
+          height:180px;
+          object-fit:contain;
+          margin-bottom:14px;
+        "
+      ),
+
+      h2(h, style = "margin:0;font-size:28px;"),
+
+tags$div(
+  style = "
+    font-size:13px;
+    color:#666;
+    margin-top:6px;
+    margin-bottom:4px;
+  ",
+  "Quarter 1: 01/01/2026–31/03/2026"
+),
+
+      div(
+        style = "
+          display:inline-block;
+          margin-top:14px;
+          padding:10px 18px;
+          border-radius:999px;
+          background:#f5f5f5;
+          font-size:14px;
+        ",
+        strong(comma(row$records)), " observations · ",
+        strong(comma(row$contributors)), " contributors · ",
+        strong(comma(row$species)), " species"
+      )
+    ),
+
+    # GRID
+    div(
+      style = "
+        display:grid;
+        grid-template-columns:1fr 1fr;
+        gap:22px;
+        width:100%;
+      ",
+
+      # SITE PHOTO
+      div(
+        style = "
+          background:#fafafa;
+          border-radius:18px;
+          padding:18px;
+          border:1px solid #ececec;
+        ",
+
+        img(
+          src = row$site_photo,
+          onerror = paste0("this.src='", default_avatar, "';"),
+          style = "
+            width:100%;
+            height:320px;
+            object-fit:cover;
+            border-radius:12px;
+          "
+        )
+        ),
+
+      # ICONIC TAXA
+      div(
+        style = "
+          background:#fafafa;
+          border-radius:18px;
+          padding:18px;
+          border:1px solid #ececec;
+          text-align:center;
+        ",
+
+        h3("Iconic Taxa Composition", style = "margin-top:0;"),
+
+        img(
+          src = paste0("hub_plots/", safe_id(h), ".jpg"),
+          onerror = paste0("this.src='", default_avatar, "';"),
+          style = "
+            width:100%;
+            max-width:480px;
+            border-radius:10px;
+          "
+        ),
+
+        tags$p(
+          style = "margin-top:16px;font-size:13px;color:#555;",
+          strong("Top iconic groups: "),
+          row$top_groups
+        )
+      ),
+
+      # TOP RECORDERS
+      div(
+        style = "
+          background:#fafafa;
+          border-radius:18px;
+          padding:18px;
+          border:1px solid #ececec;
+        ",
+        h3("Top Recorders", style = "text-align:center;"),
+        div(style="display:flex;gap:16px;justify-content:center;flex-wrap:wrap;",
+            HTML(row$top_recorders_html))
+      ),
+
+      # TOP IDENTIFIERS
+      div(
+        style = "
+          background:#fafafa;
+          border-radius:18px;
+          padding:18px;
+          border:1px solid #ececec;
+        ",
+        h3("Top Identifiers", style = "text-align:center;"),
+        div(style="display:flex;gap:16px;justify-content:center;flex-wrap:wrap;",
+            HTML(row$top_identifiers_html))
+      )
+    ),
+
+    # SPECIES
+    div(
+      style = "margin-top:28px;",
+      h3("Top Scoring Species", style = "text-align:center;margin-bottom:18px;"),
+      HTML(row$top_species_html)
+    )
+  )
+})
+
+tagList(out)
+```
