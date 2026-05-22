@@ -228,6 +228,28 @@ Q1</a></li>
 <div style="height:20px;">
 
 </div>
+<script>
+window.addEventListener("load", function() {
+
+  function moveTOC() {
+
+    var toc = document.getElementById("TOC");
+    var target = document.getElementById("toc-here");
+
+    if (toc && target && !target.contains(toc)) {
+      target.appendChild(toc);
+      toc.style.marginTop = "20px";
+    } else {
+      setTimeout(moveTOC, 100);
+    }
+  }
+
+  moveTOC();
+});
+</script>
+<div id="toc-here">
+
+</div>
 <div id="big-rock-pool-challenge-biodiversity-report---q1-2026"
 class="section level1">
 <h1>Big Rock Pool Challenge Biodiversity Report - Q1 2026</h1>
@@ -407,6 +429,7 @@ Big Rock Pool Challenge network.</p>
 is explored by different groups of people, the number of records varies,
 but every contribution adds valuable information about rock pool
 communities at that site.</p>
+<p>Hubs are arranged in alphabetical order.</p>
 <p><img src="Biodiversity-report-Q1_files/figure-html/map-1.png" width="672" style="display: block; margin: auto;" /></p>
 <table>
 <thead>
@@ -494,8 +517,11 @@ communities at that site.</p>
 These scores reflect how often this species is recorded in the overall
 Big Rock Pool Challenge dataset. The higher scoring species are those
 that are recorded less often within the project and may represent more
-unusual or less commonly observed species. The highest scoring species
-recorded during this period are presented below.</p>
+unusual or less commonly observed species.</p>
+<p>In this report, scores are given between 1-100, according to our
+current scoring system 2.1</p>
+<p>The highest scoring species recorded during this period are presented
+below.</p>
 <h2 style="margin-top:40px;margin-bottom:24px;text-align:center;">Highest Scoring Species Across All Project Data</h2>
 <div style="&#10;        display:flex;&#10;        gap:24px;&#10;        justify-content:center;&#10;        flex-wrap:wrap;&#10;        margin-bottom:50px;&#10;      ">
 <div style="&#10;        flex:1;&#10;        min-width:260px;&#10;        max-width:320px;&#10;        background:#ffffff;&#10;        border-radius:18px;&#10;        padding:20px;&#10;        box-shadow:0 3px 12px rgba(0,0,0,0.08);&#10;        border:1px solid #e6e6e6;&#10;        text-align:center;&#10;      ">
